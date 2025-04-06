@@ -6,8 +6,8 @@
 # El objetivo es que la red neuronal aprenda a detectar si una imagen fue procesada o no.
 
 import os
-# Forzar el uso de la GPU discreta (se asume que la discreta es la de índice 0)
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# Forzar el uso de la GPU discreta (se asume que la discreta es la de índice 1 en este caso)
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import glob
 import tensorflow as tf
@@ -15,8 +15,7 @@ from sklearn.model_selection import train_test_split
 import random
 import matplotlib.pyplot as plt
 
-# --- Configuración de recursos ---
-
+# Recursos
 # Limitar la memoria de la GPU a 4096 MB (ajusta este valor según tu GPU)
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
@@ -34,8 +33,7 @@ if gpus:
 tf.config.threading.set_intra_op_parallelism_threads(2)
 tf.config.threading.set_inter_op_parallelism_threads(2)
 
-# --- Rutas y Construcción del Dataset Individual ---
-
+# Dataset
 # Directorios de las imágenes
 dir_cover = 'Cover'
 dir_jmipod = 'JMiPOD'
@@ -57,7 +55,6 @@ all_labels = cover_labels + jmipod_labels
 print(f"Total de imágenes combinadas: {len(all_paths)}")
 
 # Dividir los datos en entrenamiento (64%), validación (16%) y prueba (20%)
-# Utilizamos 'stratify' para mantener el balance de clases en cada conjunto
 train_val_paths, test_paths, train_val_labels, test_labels = train_test_split(
     all_paths, all_labels, test_size=0.20, random_state=42, stratify=all_labels
 )
@@ -67,19 +64,20 @@ train_paths, val_paths, train_labels, val_labels = train_test_split(
 
 print(f"Conjunto de imágenes:\n  Entrenamiento: {len(train_paths)}\n  Validación: {len(val_paths)}\n  Prueba: {len(test_paths)}")
 
-# --- Creación del Pipeline de Datos ---
+# Pipeline de datos
 
 def load_image(filename):
-    # Carga la imagen sin redimensionarla ni normalizarla, para preservar las sutilezas de la esteganografía.
+    # Carga la imagen sin redimensionarla para preservar las sutilezas de la esteganografía.
     image_string = tf.io.read_file(filename)
     image = tf.image.decode_jpeg(image_string, channels=3)
     image = tf.cast(image, tf.float32)
+    # Normalización: escalar a [0, 1] preservando las relaciones entre valores.
+    image /= 255.0
     return image
 
 def create_dataset(paths, labels, batch_size=8, shuffle=False, shuffle_buffer=1000):
-    # Creamos el dataset con rutas y etiquetas
     ds = tf.data.Dataset.from_tensor_slices((paths, labels))
-    # En el map, cargamos la imagen y conservamos la ruta original
+    # Cargamos la imagen y conservamos la ruta (si la necesitas para otras verificaciones)
     ds = ds.map(lambda x, y: (load_image(x), y, x), num_parallel_calls=tf.data.AUTOTUNE)
     if shuffle:
         ds = ds.shuffle(buffer_size=shuffle_buffer)
@@ -87,8 +85,8 @@ def create_dataset(paths, labels, batch_size=8, shuffle=False, shuffle_buffer=10
     ds = ds.prefetch(tf.data.AUTOTUNE)
     return ds
 
-batch_size = 8
-# En el conjunto de entrenamiento se activa el shuffle para mezclar los datos
+batch_size = 44
+
 train_ds = create_dataset(train_paths, train_labels, batch_size, shuffle=True, shuffle_buffer=1000)
 val_ds = create_dataset(val_paths, val_labels, batch_size, shuffle=False)
 test_ds = create_dataset(test_paths, test_labels, batch_size, shuffle=False)
@@ -97,32 +95,46 @@ test_ds = create_dataset(test_paths, test_labels, batch_size, shuffle=False)
 for images, labels, paths in train_ds.take(1):
     print("Forma del batch de imágenes:", images.shape)
     print("Forma del batch de etiquetas:", labels.shape)
-    print("Batch de rutas:", paths.shape) 
+    print("Batch de rutas:", paths.shape)
 
+# --- Prueba con una imagen aleatoria del entrenamiento ---
 
-# Extraer un batch aleatorio del dataset de entrenamiento
 for images, labels, paths in train_ds.take(1):
-    # Seleccionar un índice aleatorio dentro del batch
     idx = random.randint(0, images.shape[0] - 1)
     chosen_image = images[idx]
     chosen_label = labels[idx].numpy()  # etiqueta: 0 o 1
-    chosen_path = paths[idx].numpy().decode('utf-8')  # convertir tensor de bytes a cadena de texto
+    chosen_path = paths[idx].numpy().decode('utf-8')  
 
     print("Índice en el batch:", idx)
     print("Etiqueta asignada:", chosen_label)
     print("Ruta del archivo:", chosen_path)
 
-    # Comprobación: si la ruta contiene "JMiPOD", debería tener etiqueta 1,
-    # y si contiene "Cover", etiqueta 0.
-    if "JMiPOD" in chosen_path and chosen_label != 1:
-        print("Advertencia: La imagen proviene de JMiPOD pero no tiene la etiqueta 1.")
-    elif "Cover" in chosen_path and chosen_label != 0:
-        print("Advertencia: La imagen proviene de Cover pero no tiene la etiqueta 0.")
-    else:
-        print("La etiqueta y la ruta concuerdan.")
-
-    # Mostrar la imagen
-    plt.imshow(chosen_image.numpy().astype("uint8"))
+    # Aquí solo mostramos el label sin comparar con la carpeta de origen.
+    plt.imshow((chosen_image.numpy() * 255).astype("uint8"))
     plt.title(f"Etiqueta: {chosen_label} | Archivo: {os.path.basename(chosen_path)}")
     plt.axis("off")
     plt.show()
+
+
+# --- PRUEBA CON IMAGEN ESPECÍFICA ---
+
+# # Especifica la ruta de la imagen que deseas probar
+# test_image_path = "1.jpg"  
+
+# # Cargar y preparar la imagen
+# test_image = load_and_prepare_image(test_image_path)
+
+# # Realizar la predicción con el modelo
+# # Se asume que 'model' está definido y entrenado previamente.
+# prediction = model.predict(test_image)
+
+# # Interpretar la predicción (por ejemplo, umbral de 0.5)
+# predicted_class = 1 if prediction[0] >= 0.5 else 0
+
+# print("Predicción del modelo:", prediction)
+# print("El modelo indica que la imagen es:", "JMiPOD (modificada)" if predicted_class == 1 else "Cover (original)")
+
+# plt.imshow(tf.squeeze(test_image).numpy().astype("uint8"))
+# plt.title(f"Predicción: {predicted_class} - {'JMiPOD' if predicted_class == 1 else 'Cover'}")
+# plt.axis("off")
+# plt.show()

@@ -1,37 +1,21 @@
 # Miguel Angel Tena Garcia - A01709653
 #
 # Red neuronal que analizará y aprenderá de dos sets de imágenes .jpg que son iguales,
-# pero una de ellas fue procesada con esteganografía con JMiPOD.
+# pero una de ellas fue procesada con esteganografía utilizando JMiPOD.
+# 
+# Ademas se utiliza un dataset en carpetas independientes de imágenes originales (Cover) y otro de imágenes procesadas (JMiPOD).
 #
-# El objetivo es que la red neuronal aprenda a detectar si una imagen fue procesada o no.
+# Las imagenes son cargadas y preprocesadas, convirtiendolas a float32 y luego normalizandolas a [0, 1].
+#
+# El objetivo es que la red neuronal aprenda a detectar si una imagen esconde información o no con esteganografía.
 
 import os
-# Forzar el uso de la GPU discreta (se asume que la discreta es la de índice 1 en este caso)
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 import glob
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 import random
 import matplotlib.pyplot as plt
 
-# Recursos
-# Limitar la memoria de la GPU a 4096 MB (ajusta este valor según tu GPU)
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    try:
-        tf.config.experimental.set_virtual_device_configuration(
-            gpus[0],
-            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)]
-        )
-        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-        print(f"{len(gpus)} GPU(s) física(s), {len(logical_gpus)} GPU(s) lógicas configuradas.")
-    except RuntimeError as e:
-        print(e)
-
-# Limitar el número de hilos de CPU para reducir el uso de la CPU
-tf.config.threading.set_intra_op_parallelism_threads(2)
-tf.config.threading.set_inter_op_parallelism_threads(2)
 
 # Dataset
 # Directorios de las imágenes

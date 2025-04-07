@@ -32,6 +32,10 @@ from sklearn.model_selection import train_test_split
 import random
 import matplotlib.pyplot as plt
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9cd2df4 (Eliminacion de restricciones y configuraciones de GPU que eran utilizadas)
 # Dataset
 # Directorios de las imágenes
 dir_cover = 'Cover'
@@ -63,7 +67,6 @@ train_paths, val_paths, train_labels, val_labels = train_test_split(
 print(f"Conjunto de imágenes:\n  Entrenamiento: {len(train_paths)}\n  Validación: {len(val_paths)}\n  Prueba: {len(test_paths)}")
 
 # Pipeline de datos
-
 def load_image(filename):
 
     # Carga la imagen sin redimensionarla para preservar las sutilezas de la esteganografía.
@@ -78,7 +81,7 @@ def load_image(filename):
 def create_dataset(paths, labels, batch_size=8, shuffle=False, shuffle_buffer=1000):
     ds = tf.data.Dataset.from_tensor_slices((paths, labels))
 
-    # Cargamos la imagen y conservamos la ruta (si la necesitas para otras verificaciones)
+    # Cargamos la imagen y conservamos la ruta
     ds = ds.map(lambda x, y: (load_image(x), y, x), num_parallel_calls=tf.data.AUTOTUNE)
     if shuffle:
         ds = ds.shuffle(buffer_size=shuffle_buffer)
@@ -102,7 +105,7 @@ for images, labels, paths in train_ds.take(1):
 for images, labels, paths in train_ds.take(1):
     idx = random.randint(0, images.shape[0] - 1)
     chosen_image = images[idx]
-    chosen_label = labels[idx].numpy()  # etiqueta: 0 o 1
+    chosen_label = labels[idx].numpy() 
     chosen_path = paths[idx].numpy().decode('utf-8')  
 
     print("Índice en el batch:", idx)
@@ -115,26 +118,3 @@ for images, labels, paths in train_ds.take(1):
     plt.axis("off")
     plt.show()
 
-
-# --- PRUEBA CON IMAGEN ESPECÍFICA ---
-
-# # Especifica la ruta de la imagen que deseas probar
-# test_image_path = "1.jpg"  
-
-# # Cargar y preparar la imagen
-# test_image = load_and_prepare_image(test_image_path)
-
-# # Realizar la predicción con el modelo
-# # Se asume que 'model' está definido y entrenado previamente.
-# prediction = model.predict(test_image)
-
-# # Interpretar la predicción (por ejemplo, umbral de 0.5)
-# predicted_class = 1 if prediction[0] >= 0.5 else 0
-
-# print("Predicción del modelo:", prediction)
-# print("El modelo indica que la imagen es:", "JMiPOD (modificada)" if predicted_class == 1 else "Cover (original)")
-
-# plt.imshow(tf.squeeze(test_image).numpy().astype("uint8"))
-# plt.title(f"Predicción: {predicted_class} - {'JMiPOD' if predicted_class == 1 else 'Cover'}")
-# plt.axis("off")
-# plt.show()

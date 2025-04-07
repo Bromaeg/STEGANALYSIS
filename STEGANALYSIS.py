@@ -32,20 +32,16 @@ from sklearn.model_selection import train_test_split
 import random
 import matplotlib.pyplot as plt
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 9cd2df4 (Eliminacion de restricciones y configuraciones de GPU que eran utilizadas)
 # Dataset
 # Directorios de las imágenes
 dir_cover = 'Cover'
 dir_jmipod = 'JMiPOD'
 
-# Obtener la lista de rutas para cada clase
+# Obtener rutas para cada clase
 cover_paths = sorted(glob.glob(os.path.join(dir_cover, '*.jpg')))
 jmipod_paths = sorted(glob.glob(os.path.join(dir_jmipod, '*.jpg')))
 
-#Print para confirmar que se cargaron las imágenes correctamente
+# Print para confirmar que se cargaron las imágenes correctamente
 print(f"Se encontraron {len(cover_paths)} imágenes en '{dir_cover}' y {len(jmipod_paths)} en '{dir_jmipod}'.")
 
 # Asignar etiquetas: 0 para Cover (original) y 1 para JMiPOD (procesada)
@@ -56,12 +52,13 @@ jmipod_labels = [1] * len(jmipod_paths)
 all_paths = cover_paths + jmipod_paths
 all_labels = cover_labels + jmipod_labels
 
-# Dividir los datos en entrenamiento (64%), validación (16%) y prueba (20%)
+# Dividir los datos en entrenamiento (70%), validación (20%) y prueba (10%)
 train_val_paths, test_paths, train_val_labels, test_labels = train_test_split(
-    all_paths, all_labels, test_size=0.20, random_state=42, stratify=all_labels)
+    all_paths, all_labels, test_size=0.10, random_state=42, stratify=all_labels)
 
 train_paths, val_paths, train_labels, val_labels = train_test_split(
-    train_val_paths, train_val_labels, test_size=0.20, random_state=42, stratify=train_val_labels)
+    train_val_paths, train_val_labels, test_size=0.22222, random_state=42, stratify=train_val_labels)
+
 
 # Validacion de separacion de datos
 print(f"Conjunto de imágenes:\n  Entrenamiento: {len(train_paths)}\n  Validación: {len(val_paths)}\n  Prueba: {len(test_paths)}")
@@ -69,9 +66,10 @@ print(f"Conjunto de imágenes:\n  Entrenamiento: {len(train_paths)}\n  Validaci�
 # Pipeline de datos
 def load_image(filename):
 
-    # Carga la imagen sin redimensionarla para preservar las sutilezas de la esteganografía.
+    # Carga la imagen sin redimensionarla para preservar los mensajes de la esteganografía.
     image_string = tf.io.read_file(filename)
     image = tf.image.decode_jpeg(image_string, channels=3)
+    # Traduccion Float32 para mejorar compatibilidad
     image = tf.cast(image, tf.float32)
 
     # Normalización: escalar a [0, 1] preservando las relaciones entre valores.
@@ -89,13 +87,15 @@ def create_dataset(paths, labels, batch_size=8, shuffle=False, shuffle_buffer=10
     ds = ds.prefetch(tf.data.AUTOTUNE)
     return ds
 
-batch_size = 128
+# Tamaño del batch
+batch_size = 128 
 
+# Crear los datasets entrenamiento, validación y prueba
 train_ds = create_dataset(train_paths, train_labels, batch_size, shuffle=True, shuffle_buffer=1000)
 val_ds = create_dataset(val_paths, val_labels, batch_size, shuffle=False)
 test_ds = create_dataset(test_paths, test_labels, batch_size, shuffle=False)
 
-# DEV mostrar la forma de un lote del conjunto de entrenamiento
+# DEV mostrar la forma de un lote, del conjunto de entrenamiento
 for images, labels, paths in train_ds.take(1):
     print("Forma del batch de imágenes:", images.shape)
     print("Forma del batch de etiquetas:", labels.shape)

@@ -118,7 +118,7 @@ input_shape = (image_size, image_size, 3)
 
 
 
-# Defincion del filtrado con banco SRM (state of the art) 
+# Defincion del filtrado con banco kernels (state of the art) 
 # solo use 3 kernels en vez de 30 por restricciones de memoria
 k1 = np.array([[0,  0,  0,  0, 0],
                [0, -1,  2, -1, 0],
@@ -187,6 +187,7 @@ model = models.Sequential([
     layers.GlobalAveragePooling2D(),
     layers.Dense(128, activation="relu"),
     layers.Dense(1,   activation="sigmoid")
+
 ])
 
 # Cargamos los pesos fijos para el primer bloque 
@@ -242,6 +243,16 @@ plt.xlabel("Predicción")
 plt.ylabel("Real")
 plt.savefig("confusion_matrix.png")
 plt.close()
+
+plt.figure(figsize=(10,5))
+plt.plot(history.history["accuracy"], label="Entrenamiento")
+plt.plot(history.history["val_accuracy"], label="Validación")
+plt.title("Precisión del Modelo")
+
+plt.figure(figsize=(10,5))
+plt.plot(history.history["loss"], label="Entrenamiento")
+plt.plot(history.history["val_loss"], label="Validación")
+plt.title("Pérdida del Modelo")
 
 # Reporte
 print(classification_report(

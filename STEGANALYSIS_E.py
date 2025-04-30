@@ -2,16 +2,14 @@
 # Miguel Angel Tena Garcia - A01709653
 # STEGANALYSIS.py
 #
-# Este script es parte de un proyecto de análisis de imágenes para detectar esteganografía.
+# Este script es parte de un proyecto de análisis de imágenes para detectar esteganografía,
+# ahora usando transferencia de aprendizaje con VGG16 como extractor de características.
 #
 # (Obtencion) Se obtuvo un set de datos de la competencia de deteccion de esteganografia ALASKA2,
 # utilizando directamente dos directorios de imágenes .jpg que son iguales,
 # siendo una de ellas procesada utilizando JMiPOD.
 #
 # Dataset: https://www.kaggle.com/competitions/alaska2-image-steganalysis/data
-#
-# En este caso, solo se utilizo el dataset sin aumentarle o generar datos ya que podria interferir
-# con las sutiles señales de esteganografía que se buscan.
 #
 # (Preprocesado y escalamiento) Cargamos las imagenes convirtiendolas a float32 y despues normalizandolas
 # dividiendo entre 255 para que los valores de los pixeles esten entre 0 y 1 sin perder la informacion
@@ -20,59 +18,53 @@
 # (Segmentacion) Separamos los datos en tres conjuntos: entrenamiento (70%), validacion (20%) y prueba (10%).
 # utilizando train_test_split de sklearn para dividir las imagenes en las tres categorias.
 #
-# El objetivo es que la red neuronal aprenda a detectar si una imagen esconde
-# información o no con esteganografía.
-#
+# Ahora usamos VGG16 pre-entrenado para extraer características, congelando sus capas convolucionales.
+# Luego añadimos un clasificador denso propio para detectar steganografía.
 #
 
 import os
 import glob
+import random
+import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
-import random
 import matplotlib.pyplot as plt
-from keras import layers, models
-import numpy as np
-from sklearn.metrics import confusion_matrix, classification_report
 import seaborn as sns
+from keras import layers, models
+from keras.applications import VGG16
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+from sklearn.metrics import confusion_matrix, classification_report
 
 print("TensorFlow version:", tf.__version__)
 print("GPUs disponibles:", tf.config.list_physical_devices("GPU"))
 
-# Configuración para evitar OOM
+# Configuración para evitar OOM en GPU
 gpus = tf.config.list_physical_devices("GPU")
 if gpus:
-    try:
-        # Limitar el uso de memoria GPU
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-    except RuntimeError as e:
-        print(e)
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
 
-# Dataset
-dir_cover = "Cover"
+# Directorios de datos
+dir_cover  = "Cover"
 dir_jmipod = "JMiPOD"
 
-# Sorted para asegurar que las imagenes esten en el mismo orden
+# Listado y muestreo de rutas
 cover_paths  = sorted(glob.glob(os.path.join(dir_cover,  "*.jpg")))
 jmipod_paths = sorted(glob.glob(os.path.join(dir_jmipod, "*.jpg")))
-
-# Número de muestras
-num_samples   = 15000
-cover_paths   = random.sample(cover_paths,   num_samples)
-jmipod_paths  = random.sample(jmipod_paths,  num_samples)
+num_samples  = 20000
+cover_paths  = random.sample(cover_paths,  num_samples)
+jmipod_paths = random.sample(jmipod_paths, num_samples)
 
 print(f"Se encontraron {len(cover_paths)} imágenes en '{dir_cover}' y {len(jmipod_paths)} en '{dir_jmipod}'.")
 
-# Asignar etiquetas
+# Etiquetas
 cover_labels  = [0] * len(cover_paths)
 jmipod_labels = [1] * len(jmipod_paths)
 
-# Combinar las listas
+# Combinar y dividir
 all_paths  = cover_paths  + jmipod_paths
 all_labels = cover_labels + jmipod_labels
 
-# Dividir los datos
 train_val_paths, test_paths, train_val_labels, test_labels = train_test_split(
     all_paths, all_labels, test_size=0.10, random_state=42, stratify=all_labels)
 
@@ -81,41 +73,48 @@ train_paths, val_paths, train_labels, val_labels = train_test_split(
     test_size=0.22222, random_state=42, stratify=train_val_labels)
 
 print(
-    f"Conjunto de imágenes:\n  Entrenamiento: {len(train_paths)}\n  Validación: {len(val_paths)}\n  Prueba: {len(test_paths)}"
+    f"Conjunto de imágenes:\n"
+    f"  Entrenamiento: {len(train_paths)}\n"
+    f"  Validación:    {len(val_paths)}\n"
+    f"  Prueba:        {len(test_paths)}"
 )
 
-# Reduccion tamaño de escalado
+# Parámetros de imagen
 image_size = 256
-
-# Pipeline de datos
-def load_image(filename):
-    image  = tf.io.read_file(filename)
-    image  = tf.image.decode_jpeg(image, channels=3)
-
-    # Convertir a float32 y normalizar, tambien se escala a 256x256
-    image  = tf.image.resize( image, [image_size, image_size],
-                              method=tf.image.ResizeMethod.LANCZOS5,
-                              antialias=True)
-    image  = tf.cast(image, tf.float32) / 255.0
-    return image
-
-# Funcion crear dataset, ruta imagenes y etiquetas
-def create_dataset(paths, labels, batch_size, shuffle=False, shuffle_buffer=1000):
-    ds = tf.data.Dataset.from_tensor_slices((paths, labels))
-    ds = ds.map(lambda x, y: (load_image(x), y),
-                num_parallel_calls=tf.data.AUTOTUNE)
-    if shuffle:
-        ds = ds.shuffle(buffer_size=shuffle_buffer)
-    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return ds
-
-# Crear los datasets
-batch_size = 8
-train_ds = create_dataset(train_paths, train_labels, batch_size, shuffle=True)
-val_ds   = create_dataset(val_paths,   val_labels,   batch_size)
-test_ds  = create_dataset(test_paths,  test_labels,  batch_size)
+batch_size = 12
 input_shape = (image_size, image_size, 3)
 
+# Función de carga y preprocesado
+def load_image(path):
+    img = tf.io.read_file(path)
+    img = tf.image.decode_jpeg(img, channels=3)
+    img = tf.image.resize(img, [image_size, image_size],
+                          method=tf.image.ResizeMethod.LANCZOS5,
+                          antialias=True)
+    return tf.cast(img, tf.float32) / 255.0
+
+# Crear tf.data.Dataset
+def create_dataset(paths, labels, shuffle=False):
+    ds = tf.data.Dataset.from_tensor_slices((paths, labels))
+    ds = ds.map(lambda p, y: (load_image(p), y),
+                num_parallel_calls=tf.data.AUTOTUNE)
+    if shuffle:
+        ds = ds.shuffle(buffer_size=1000)
+    return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+train_ds = create_dataset(train_paths, train_labels, shuffle=True)
+val_ds   = create_dataset(val_paths,   val_labels)
+test_ds  = create_dataset(test_paths,  test_labels)
+
+# --- Construcción del modelo con VGG16 + cabezal personalizado ---
+
+# 1) Cargar VGG16 sin la "cabeza" de clasificación y congelar capas
+base_model = VGG16(
+    weights='imagenet',
+    include_top=False,
+    input_shape=input_shape
+)
+base_model.trainable = False
 
 
 # Defincion del filtrado con banco kernels (state of the art) 
@@ -144,7 +143,6 @@ srm_bank = np.stack([srm_bank]*3, axis=-2)
 
 
 
-# Construcción del modelo, usando el banco srm como primer bloque
 fixed_srm = layers.Conv2D(
     filters=srm_bank.shape[-1],
     kernel_size=(5,5),
@@ -154,34 +152,37 @@ fixed_srm = layers.Conv2D(
     input_shape=input_shape
 )
 
-# Pooling para extraer caracteristicas y reducir dimensionalidad
+
+# Pooling para extraer caracteristicas
 def l2_pool(x):
     return tf.sqrt(
         tf.nn.avg_pool2d(tf.square(x), ksize=3, strides=1, padding='SAME'))
 
-# Definimos el modelo secuencial
-# 3 Bloques de convolucion y pooling, seguido de un clasificador denso
+
+# 2) Añadir clasificadores propios
 model = models.Sequential([
+
+    # Capa de convolución con los filtros de SRM
     fixed_srm,
     layers.Lambda(l2_pool),
 
     # Bloque 1
     layers.Conv2D(32,  3, padding="same", activation="relu"),
+
+    # Batchnorm para normalizar la salida de la capa convolucional
     layers.BatchNormalization(),
     layers.Conv2D(32,  3, padding="same", activation="relu"),
-    layers.Dropout(0.25),
+    
 
     # Bloque 2
     layers.Conv2D(64,  3, padding="same", activation="relu"),
     layers.BatchNormalization(),
     layers.Conv2D(64,  3, padding="same", activation="relu"),
-    layers.Dropout(0.25),
 
     # Bloque 3
     layers.Conv2D(128, 3, padding="same", activation="relu"),
     layers.BatchNormalization(),
     layers.Conv2D(128,  3, padding="same", activation="relu"),
-    layers.Dropout(0.20),
 
     # Clasificador denso, sigmoide para clasificacion binaria y relu para la capa oculta
     layers.GlobalAveragePooling2D(),
@@ -190,10 +191,7 @@ model = models.Sequential([
 
 ])
 
-# Cargamos los pesos fijos para el primer bloque 
-model.layers[0].set_weights([srm_bank])
-
-# Compilación del modelo 
+# Compilación
 model.compile(
     optimizer='adam',
     loss='binary_crossentropy',
@@ -201,61 +199,50 @@ model.compile(
 )
 model.summary()
 
-# Callbacks para conservar el mejor modelo y detener el entrenamiento si no mejora
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-    "model.h5", monitor="val_loss", save_weights_only=False,
-    save_best_only=True, verbose=1,)
+# Callbacks
+checkpoint = ModelCheckpoint(
+    "vgg16_stegano.h5", monitor="val_accuracy",
+    save_best_only=True, verbose=1
+)
 
-early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss", patience=7,
-    restore_best_weights=True, verbose=1)
 
-# Entrenamiento, 5 epocas por practicidad
+# Entrenamiento
 history = model.fit(
     train_ds,
     validation_data=val_ds,
-    epochs=5,
-    callbacks=[checkpoint_callback, early_stopping])
+    epochs=20,
+    callbacks=[checkpoint]
+)
 
-# Evaluación por lotes para optimizar memoria
-y_true = []
-y_pred = []
+# Cargar mejor modelo
+best_model = tf.keras.models.load_model("vgg16_stegano.h5")
 
+# Evaluación en test
+loss, acc = best_model.evaluate(test_ds, verbose=1)
+print(f"\nTest loss: {loss:.4f} — Test accuracy: {acc:.4f}\n")
 
-# Evaluacion del modelo con el conjunto de prueba (aqui truena por la GPU)
-for x_batch, y_batch in test_ds:
-    y_batch_pred = model(x_batch, training=False)
-    y_true.extend(y_batch.numpy())
-    y_pred.extend(y_batch_pred.numpy().flatten())
+# Matriz de Confusión y Reporte
+y_true, y_pred = [], []
+for x, y in test_ds:
+    probs = best_model.predict(x).ravel()
+    y_true.extend(y.numpy())
+    y_pred.extend((probs >= 0.5).astype(int))
 
 y_true = np.array(y_true)
 y_pred = np.array(y_pred)
-y_pred_classes = np.round(y_pred)
 
-# Matriz de Confusión 
-cm = confusion_matrix(y_true, y_pred_classes)
-plt.figure(figsize=(8,6))
+cm = confusion_matrix(y_true, y_pred)
+plt.figure(figsize=(6, 5))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
             xticklabels=["Cover","JMiPOD"],
             yticklabels=["Cover","JMiPOD"])
-plt.title("Matriz de Confusión")
+plt.title("Matriz de Confusión (Test)")
 plt.xlabel("Predicción")
 plt.ylabel("Real")
 plt.savefig("confusion_matrix.png")
 plt.close()
 
-plt.figure(figsize=(10,5))
-plt.plot(history.history["accuracy"], label="Entrenamiento")
-plt.plot(history.history["val_accuracy"], label="Validación")
-plt.title("Precisión del Modelo")
-
-plt.figure(figsize=(10,5))
-plt.plot(history.history["loss"], label="Entrenamiento")
-plt.plot(history.history["val_loss"], label="Validación")
-plt.title("Pérdida del Modelo")
-
-# Reporte
 print(classification_report(
-    y_true, y_pred_classes,
-    target_names=["Cover","JMiPOD"]
+    y_true, y_pred,
+    target_names=["Cover", "JMiPOD"]
 ))

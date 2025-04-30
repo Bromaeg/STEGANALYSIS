@@ -1,9 +1,9 @@
 # Tecnologico de Monterrey - Campus Queretaro
 # Miguel Angel Tena Garcia - A01709653
-# evaluacion_modelo.py
+# prueba.py
 #
 # Este script reconstruye el test set, recrea la arquitectura exacta
-# y carga sólo los pesos de model.h5 para evitar el error de marshal.
+# y carga sólo los pesos de model.h5 para evitar el error de GPU y de marshal.
 
 import os, glob, random
 import tensorflow as tf
@@ -13,11 +13,12 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
 from keras import layers, models
+from PIL import Image
 
 print("TensorFlow version:", tf.__version__)
 print("GPUs disponibles:", tf.config.list_physical_devices("GPU"))
 
-# --- 1) Reconstruir rutas y etiquetas con la misma semilla ---
+# Recuperar ruta de los datasets 
 random.seed(42)
 dir_cover, dir_jmipod = "Cover", "JMiPOD"
 
@@ -42,8 +43,8 @@ _, test_paths, _, test_labels = train_test_split(
 
 print(f"Núm. de samples de test = {len(test_paths)}")
 
-# --- 2) Crear sólo el test_ds ---
-image_size = 300   # idéntico al entrenamiento
+# Dataset test test_path
+image_size = 300   
 batch_size = 10
 
 def load_image(fn):
@@ -65,8 +66,9 @@ def create_dataset(paths, labels):
 
 test_ds = create_dataset(test_paths, test_labels)
 
-# --- 3) Reconstruir EXACTAMENTE la arquitectura ---
-#   a) L2‐pool como función “named” (no lambda)
+# Reconstruccion de arquitectura para solo cargar pesos
+# y evitar el error de marshal
+
 def l2_pool(x):
     return tf.sqrt(
         tf.nn.avg_pool2d(tf.square(x),
@@ -75,7 +77,7 @@ def l2_pool(x):
 
 input_shape = (image_size, image_size, 3)
 
-# 3b) Banco SRM (idéntico al tuyo: 3 kernels)
+
 k1 = np.array([[0,0,0,0,0],
                [0,-1,2,-1,0],
                [0,2,-4,2,0],
@@ -97,7 +99,6 @@ srm_bank = np.stack([srm_bank]*3,axis=-2)   # (5,5,3,3)
 
 # Construir modelo secuencial:
 model = models.Sequential([
-    # capa fija SRM
     layers.Conv2D(
         filters=3, kernel_size=5, padding="same",
         use_bias=False, trainable=False,
@@ -108,8 +109,12 @@ model = models.Sequential([
 
     # Bloque 1
     layers.Conv2D(32,3,padding="same",activation="relu", name="c1"),
+
+    # Batchnorm para normalizar la salida de la capa convolucional
     layers.BatchNormalization(name="bn1"),
     layers.Conv2D(32,3,padding="same",activation="relu", name="c1b"),
+
+    # Dropout para evitar overfitting
     layers.Dropout(0.25, name="d1"),
 
     # Bloque 2
@@ -130,7 +135,7 @@ model = models.Sequential([
     layers.Dense(1,activation="sigmoid",name="out")
 ])
 
-# 3c) Cargar pesos fijos SRM en la primera capa
+# Asignar pesos del banco SRM a la capa convolucional fija
 model.get_layer("fixed_srm").set_weights([srm_bank])
 
 # Compilar
@@ -139,14 +144,30 @@ model.compile(optimizer='adam',
               metrics=['accuracy'])
 model.summary()
 
-# 4) Cargar pesos (¡sólo pesos, no config!)
-model.load_weights("model.h5")
+# Cargar pesos del modelo entrenado
+model.load_weights("vgg16_stegano.h5")
 
-# 5) Evaluar
+# Evaluar
 loss, acc = model.evaluate(test_ds, verbose=1)
 print(f"\nTest loss: {loss:.4f} — Test acc: {acc:.4f}\n")
 
-# 6) Matriz de confusión + reporte
+# Prueba cargando imagen
+
+def predict_single(image_path, model, image_size=300):
+    img = Image.open(image_path).convert("RGB")
+    img = img.resize((image_size, image_size), Image.LANCZOS)
+    x = np.asarray(img, dtype=np.float32) / 255.0
+    x = np.expand_dims(x, axis=0)
+    prob = model.predict(x, verbose=0)[0,0]
+    label = "JMiPOD" if prob >= 0.5 else "Cover"
+    return prob, label
+
+# Imagen no esteganografiada
+imagen_prueba = "RESERVADAS/80005.jpg"
+prob, etiqueta = predict_single(imagen_prueba, model, image_size=300)
+print(f"{prob:.3f} → {etiqueta}")
+
+# Matriz de confusion + reporte
 y_true, y_pred = [], []
 for x,y in test_ds:
     p = model(x, training=False).numpy().flatten()
